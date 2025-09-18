@@ -16,12 +16,13 @@ const app = express();
 
 
 const corsOptions = {
-      origin: [
-        'http://localhost:3000', 
-        'http://127.0.0.1:5501', 
-        'https://web-pessico.onrender.com', 
-        'https://server-pepsicola-1.onrender.com' // เพิ่มตรงนี้
-    ],
+       origin: [
+    'http://localhost:3000',
+    'http://127.0.0.1:5501',
+    'https://web-pessico.onrender.com',
+    'https://web-pessico-page2.onrender.com',  // เพิ่มตรงนี้
+    'https://server-pepsicola-1.onrender.com' // อันนี้ไม่จำเป็นต้องมี
+  ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Cookie']
