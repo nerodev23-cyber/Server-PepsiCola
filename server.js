@@ -19,6 +19,7 @@ const corsOptions = {
        origin: [
     'http://localhost:3000',
     'http://127.0.0.1:5500',
+    'http://127.0.0.1:5501',
     'https://web-pessico.onrender.com',
     'https://web-pessico-page2.onrender.com',  // เพิ่มตรงนี้
     'https://server-pepsicola-1.onrender.com' // อันนี้ไม่จำเป็นต้องมี
@@ -66,9 +67,11 @@ const pool = mysql.createPool({
 
 // =============================================== API ลงทะเบียน เก็บข้อมูล ======================================================
 // Meddleware
+
+
 const meddlewareRegisterUser = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 นาที
-    max: 50, // จำกัด 3 ครั้งต่อ 15 นาที
+    windowMs: 5 * 60 * 1000, // 15 นาที
+    max: 3, // จำกัด 3 ครั้งต่อ 15 นาที
     message: {
         error: 'Too many registration attempts. Please try again later.'
     },
@@ -79,22 +82,21 @@ const meddlewareRegisterUser = rateLimit({
 
 // API Endpoint สำหรับการลงทะเบียนผู้ใช้งาน
 app.post('/api/register', meddlewareRegisterUser, async (req, res) => {
-    let conn;
     try {
         // ดึงข้อมูลจาก body
-        const { fullName, username, password, phone, supplierName } = req.body;
+        const { fullName, username, password, phone, supplierName , department } = req.body;
 
         // ตรวจสอบข้อมูลที่จำเป็น
-        if (!fullName || !username || !password || !phone) {
+        if (!fullName || !username || !password || !phone || !supplierName || !department) {
             return res.status(400).json({
                 error: 'Please provide full name, username, password, and phone number.'
             });
         }
 
-        // แฮชรหัสผ่าน
+        // ถ้าต้องการมีการแฮชรหัสผ่าน 
       //const hashedPassword = await bcrypt.hash(password, 10);
 
-        conn = await pool.getConnection();
+       const conn = await pool.getConnection(); // รอรับ connection จาก pool การเชื่อมต่อฐานข้อมูลก่อน 
 
         // ตรวจสอบว่า username ซ้ำหรือไม่
         const [existingUser] = await conn.execute(
@@ -119,8 +121,8 @@ app.post('/api/register', meddlewareRegisterUser, async (req, res) => {
 
         // สร้าง query สำหรับเพิ่มข้อมูล
         const sql = `
-            INSERT INTO registrationsUser (full_name, username, password_hash, phone, supplier_name)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO registrationsUser (full_name, username, password_hash, phone, supplier_name , department)
+            VALUES (?, ?, ?, ?, ? , ?)
         `;
 
         const values = [
@@ -129,7 +131,8 @@ app.post('/api/register', meddlewareRegisterUser, async (req, res) => {
           //hashedPassword,
           password,
             phone,
-            supplierName || null
+            supplierName ,
+            department
         ];
 
         const [result] = await conn.execute(sql, values);
@@ -147,13 +150,11 @@ app.post('/api/register', meddlewareRegisterUser, async (req, res) => {
     }
 });
 
-
 // =============================================== API ลงทะเบียน เก็บข้อมูล  END ======================================================
 
 
 
-
-// ============================== Login Admin or User V 2  ===============================================================================
+// ============================== Login Admin or User V 2  =========================================================================
 
 const loginLimiter = rateLimit({
     windowMs: 2 * 60 * 1000, // 2 นาที
@@ -171,15 +172,17 @@ const sessions = {};
 
 // Login route
 app.post('/loginAdminandUser', loginLimiter, async (req, res) => {
-    const { username, password } = req.body;
 
-    
+    const { username, password } = req.body;
     if (!username || !password) {
         return res.status(400).json({ message: 'กรุณาใส่กรอกข้อมูล user และ password' });
     }
 
     try {
-        const [result] = await pool.query(
+
+        const conn = await pool.getConnection(); // รอรับ connection จาก pool การเชื่อมต่อฐานข้อมูลก่อน
+
+        const [result] = await conn.query(
             'SELECT * FROM accounts WHERE username = ? AND password_hash = ?',
             [username, password]
         );
@@ -190,14 +193,25 @@ app.post('/loginAdminandUser', loginLimiter, async (req, res) => {
 
         const user = result[0];
 
+      let departmentData = null;
+ // เก็บเฉพาะค่า department
+ if (user.type === 'user') {
+            departmentData = user.department;
+        } else if (user.type == 'admin'){
+            departmentData = user.department;
+        } else if (user.type == 'superadmin'){
+            departmentData = user.department;
+        }
+
+
         // สร้าง session key
         const sessionKey = crypto.randomBytes(16).toString('hex');
         const expireTime = Date.now() + 24 * 60 * 60 * 1000; // 24 ชั่วโมง
-       // const expireTime = Date.now() + 1 * 60 * 1000; //  นาที
-        //const expireTime = Date.now() +  10 * 1000; // 3 นาที
+       // const expireTime = Date.now() + 1 * 60 * 1000; //  1 นาที
+        //const expireTime = Date.now() +  10 * 1000; // 10 วินาที
 
 
-        // เก็บ session ใน memory  // เก็บใน Sorage แล้ว
+        // เก็บ session key ของและ user ที่ login ผ่าน ไว้ที่ Memory sessions และ ส่งไปหา Client  // เก็บใน Sorage แล้ว
         sessions[sessionKey] = {
             username: user.username,
             type: user.type,
@@ -214,7 +228,8 @@ app.post('/loginAdminandUser', loginLimiter, async (req, res) => {
                 supplier: user.supplier,
                 loginTime: Date.now(),
                 sessionKey,
-                expireTime
+                expireTime,
+                departmentData
             }
         });
 
@@ -226,54 +241,39 @@ app.post('/loginAdminandUser', loginLimiter, async (req, res) => {
     }
 });
 
-app.post('/api/check-session', (req, res) => {
-    const { sessionKey } = req.body;
-
-    if (!sessionKey || !sessions[sessionKey]) {
-        return res.status(401).json({ valid: false });
-    }
-
-    const session = sessions[sessionKey];
-
-    // ตรวจสอบหมดอายุ
-    if (Date.now() > session.expireTime) {
-        delete sessions[sessionKey]; // ลบ session
-        return res.status(401).json({ valid: false });
-    }
-
-    res.json({ valid: true, username: session.username, type: session.type });
-});
 
 
 
-app.post('/api/get-regiscar-data', async (req, res) => {
-    const { sessionKey } = req.body;
+// Enpoint สำหรับ admin and SuperAdmin ดึงข้อมูล User ที่ได้ Register
+app.post('/admin/get-regiscar-data', async (req, res) => {
+    const { sessionKey, type, departmentData } = req.body;
 
-    // ตรวจสอบ sessionKey ใน memory
     if (!sessionKey || !sessions[sessionKey]) {
         return res.status(401).json({ message: 'Session not found' });
     }
 
     const session = sessions[sessionKey];
 
-    // ตรวจสอบหมดอายุ
     if (Date.now() > session.expireTime) {
-        delete sessions[sessionKey]; // ลบ session
         return res.status(401).json({ message: 'Session expired' });
     }
 
-    // ตรวจสอบว่าเป็น admin หรือไม่
-    if (session.type !== 'admin') {
-        return res.status(403).json({ message: 'Access denied. Admin only' });
-    }
-
     try {
-        // ดึงข้อมูลจากฐานข้อมูล
-        const [rows] = await pool.query('SELECT * FROM registrationsUser');
-        
+        let rows;
+
+        if (type === 'admin') {
+            // สำหรับ admin เอาแค่ department ของตัวเอง
+            rows = await pool.query('SELECT * FROM registrationsUser WHERE department = ?', [departmentData]);
+        } else if (type === 'superadmin') {
+            // สำหรับ superadmin เอาทั้งหมด
+            rows = await pool.query('SELECT * FROM registrationsUser');
+        } else {
+            return res.status(403).json({ message: 'Access denied' });
+        }
+
         res.json({
             success: true,
-            data: rows
+            data: rows[0] || rows // ถ้าใช้ mysql2 promise จะ return [rows, fields]
         });
 
     } catch (err) {
@@ -282,23 +282,22 @@ app.post('/api/get-regiscar-data', async (req, res) => {
     }
 });
 
-
-// ===== SERVER-SIDE API =====
+// Enpoint admin and SuperAdmin ปฎิเสฐ  User Register =====
 app.post('/api/reject-user', async (req, res) => {
     const { sessionKey, username } = req.body;
+
+        const session = sessions[sessionKey];
 
     // ตรวจสอบ session
     if (!sessionKey || !sessions[sessionKey]) {
         return res.status(401).json({ message: 'Session not found' });
     }
-
-    const session = sessions[sessionKey];
-    if (Date.now() > session.expireTime) {
-        delete sessions[sessionKey];
+   
+     if (Date.now() > session.expireTime) {
         return res.status(401).json({ message: 'Session expired' });
     }
 
-    if (session.type !== 'admin') {
+    if (session.type !== 'admin' && session.type !== 'superadmin') {
         return res.status(403).json({ message: 'Access denied. Admin only' });
     }
 
@@ -317,7 +316,6 @@ app.post('/api/reject-user', async (req, res) => {
             return res.status(404).json({ message: 'User not found' });
         }
 
-        console.log(`User ${username} rejected and deleted by admin ${session.username}`);
 
         res.json({
             success: true,
@@ -334,58 +332,49 @@ app.post('/api/reject-user', async (req, res) => {
     }
 });
 
-// ======= ยอมรับ API =========
+// Enpoint admin and SuperAdmin ยอมรับ  User Register =====
 app.post('/api/accept-user', async (req, res) => {
     const { sessionKey, userData } = req.body;
 
-    // ตรวจสอบ session
+     const session = sessions[sessionKey];
+
+    // ตรวจสอบ sessionKey จาก Memory 
     if (!sessionKey || !sessions[sessionKey]) {
         return res.status(401).json({ message: 'Session not found' });
     }
 
-    const session = sessions[sessionKey];
+   
     if (Date.now() > session.expireTime) {
-        delete sessions[sessionKey];
         return res.status(401).json({ message: 'Session expired' });
     }
 
-    if (session.type !== 'admin') {
+    if (session.type !== 'admin' && session.type !== 'superadmin') {
         return res.status(403).json({ message: 'Access denied. Admin only' });
     }
-
+    // ตรวจสอบ Req ที่ส่งมาว่า username ไหม 
     if (!userData || !userData.username) {
         return res.status(400).json({ message: 'User data is required' });
     }
 
     try {
-        // ✅ ตรวจสอบว่า User มีอยู่ใน accounts แล้วหรือไม่
-        const [existingUser] = await pool.query(
-            'SELECT * FROM accounts WHERE username = ?',
-            [userData.username]
-        );
 
-        if (existingUser.length > 0) {
-            return res.status(400).json({ message: 'User already exists in accounts' });
-        }
-
-        // ✅ เพิ่ม User ลงในตาราง accounts (ใช้ข้อมูลที่ส่งมาจาก frontend)
-        const [insertResult] = await pool.query(`
-            INSERT INTO accounts (username, password_hash, supplier, type) 
-            VALUES (?, ?, ?, ?)
+         await pool.query(`
+            INSERT INTO accounts (username, password_hash, supplier, type , department) 
+            VALUES (?, ?, ?, ?, ? )
         `, [
             userData.username,
             userData.password_hash,
             userData.supplier_name,
-            'user'  // กำหนด type เป็น 'user' ทั้งหมด
+            'user',
+            userData.department,
         ]);
 
-        // ✅ ลบ User จาก registrationsUser (หลังจาก accept แล้ว)
+        //  ลบ User จาก registrationsUser (หลังจาก accept แล้ว)
         await pool.query(
             'DELETE FROM registrationsUser WHERE username = ?',
             [userData.username]
         );
 
-        console.log(`User ${userData.username} accepted and moved to accounts by admin ${session.username}`);
 
         res.json({
             success: true,
@@ -411,19 +400,351 @@ app.post('/api/accept-user', async (req, res) => {
     }
 });
 
-// ============================== Login Admin or User End  ===============================================================================
+// เพิ่ม Admin สำหรับ SuperAdmin
+app.post('/api/add-admin', async (req, res) => {
+    const { sessionKey, userData } = req.body;
+    const session = sessions[sessionKey];
+
+    if (!sessionKey || !session) return res.status(401).json({ message: 'Session not found' });
+    if (Date.now() > session.expireTime) return res.status(401).json({ message: 'Session expired' });
+    if (session.type !== 'superadmin') return res.status(403).json({ message: 'Access denied. Superadmin only' });
+
+    if (!userData || !userData.username || !userData.type || !userData.department) {
+        return res.status(400).json({ message: 'User data is required' });
+    }
+
+    try {
+        await pool.query(`
+            INSERT INTO accounts (username, password_hash, supplier, type, department)
+            VALUES (?, ?, ?, ?, ?)
+        `, [
+            userData.username,
+            userData.password_hash,
+            "-",            // supplier เป็น "-"
+            userData.type,  // admin หรือ superadmin
+            userData.department
+        ]);
+
+        res.json({
+            success: true,
+            message: `เพิ่ม ${userData.type} ${userData.username} เรียบร้อย`,
+            addedUser: userData
+        });
+    } catch (err) {
+        console.error('Database Error:', err);
+        if (err.code === 'ER_DUP_ENTRY') {
+            return res.status(400).json({ message: 'Username already exists' });
+        }
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+});
+
+//==========================================================
 
 
 
 
 
+// Enpoint สำหรับ Admin , SuperAdmin ดู ข้อมูลรถที่ได้ลงทะเบียน  เพื่อกด ยอมรับ Order หรือ  ไม่ยอมรับ Order  
+app.post('/admin/get-regiscar-data-order', async (req, res) => {
+    const { sessionKey, departmentData } = req.body;
+
+    if (!sessionKey || !sessions[sessionKey]) {
+        return res.status(401).json({ message: 'Session not found' });
+    }
+
+    const session = sessions[sessionKey];
+
+    if (Date.now() > session.expireTime) {
+        return res.status(401).json({ message: 'Session expired' });
+    }
+
+    // เช็คสิทธิ์
+    if (session.type !== 'admin' && session.type !== 'superadmin') {
+        return res.status(403).json({ message: 'Access denied. Admin only' });
+    }
+
+    try {
+
+        let rows;
+
+        if(session.type === 'superadmin' || departmentData === 'superadmin'){
+            [rows] = await pool.query('SELECT * FROM regiscar');
+        }else{
+             [rows] = await pool.query(
+                'SELECT * FROM regiscar WHERE department = ?',
+                [departmentData]
+            );
+        }
+
+       
+        res.json({
+            success: true,
+            departmentData: departmentData,
+            data: rows
+        });
+
+    } catch (err) {
+        console.error('Database Error:', err);
+        res.status(500).json({ message: 'Server Error' });
+    }
+});
 
 
+// Enpoint สำหรับ สำหรับ User ที่จะดูข้อมูลที่ได้ ลงทะเบียน แต่ยังไม่ถูกยอมรับจาก Admin , SuperAdmin
+app.post('/user/get-btnViewRegisteredData', async (req, res) => {
+    const { sessionKey, username } = req.body;
+
+    if (!sessionKey || !sessions[sessionKey]) {
+        return res.status(401).json({ message: 'Session not found' });
+    }
+
+    const session = sessions[sessionKey];
+
+    if (Date.now() > session.expireTime) {
+        return res.status(401).json({ message: 'Session expired' });
+    }
+
+    try {
+        // หา id ของ user จาก accounts
+        const [accountRows] = await pool.query(
+            'SELECT id FROM accounts WHERE username = ? LIMIT 1',
+            [username]
+        );
+
+        if (accountRows.length === 0) {
+            return res.status(404).json({ message: 'Username not found in accounts' });
+        }
+
+        const id_user = accountRows[0].id;
+
+        // ดึงข้อมูลจาก regiscar ของ user นี้
+        const [regiscarRows] = await pool.query(
+            'SELECT * FROM regiscar WHERE id_user = ?',
+            [id_user]
+        );
+
+        res.json({
+            success: true,
+            data: regiscarRows
+        });
+
+    } catch (err) {
+        console.error('Database Error:', err);
+        res.status(500).json({ message: 'Server Error' });
+    }
+});
+
+// Enpoint  สำหรับ User ที่จะดูข้อมูลที่ได้ ลงทะเบียน และถูกยอมรับจาก Admin , SuperAdmin
+app.post('/user/get-btnViewPendingOrders', async (req, res) => {
+    const { sessionKey, username } = req.body;
+
+    if (!sessionKey || !sessions[sessionKey]) {
+        return res.status(401).json({ message: 'Session not found' });
+    }
+
+    const session = sessions[sessionKey];
+
+    if (Date.now() > session.expireTime) {
+        return res.status(401).json({ message: 'Session expired' });
+    }
+
+    try {
+        // หา id ของ user จาก accounts
+        const [accountRows] = await pool.query(
+            'SELECT id FROM accounts WHERE username = ? LIMIT 1',
+            [username]
+        );
+
+        if (accountRows.length === 0) {
+            return res.status(404).json({ message: 'Username not found in accounts' });
+        }
+
+        const id_user = accountRows[0].id;
+
+        // ดึงข้อมูลจาก regiscar_accepted ของ user นี้
+        const [regiscarRows] = await pool.query(
+            'SELECT * FROM regiscar_accepted WHERE id_user = ?',
+            [id_user]
+        );
+
+        res.json({
+            success: true,
+            data: regiscarRows
+        });
+
+    } catch (err) {
+        console.error('Database Error:', err);
+        res.status(500).json({ message: 'Server Error' });
+    }
+});
+
+// Enpoint สำหรับ ยอมรับ จาก Admin , SupderAdmin
+app.post('/register-accepted', async (req, res) => {
+    const { dataList, sessionKey } = req.body;
+
+    const session = sessions[sessionKey];
+    if (!session || Date.now() > session.expireTime) {
+        return res.status(401).json({ message: 'Session expired' });
+    }
+
+    try {
+        if (!Array.isArray(dataList) || dataList.length === 0) {
+            return res.status(400).json({ message: 'No Data provided' });
+        }
+
+        const conn = await pool.getConnection();
+
+        try {
+            await conn.beginTransaction();
+
+            for (const item of dataList) {
+                const {
+                    subblier,
+                    fullname,
+                    typecarTwo,
+                    frontPlate,
+                    rearPlate,
+                    product,
+                    department,
+                    weightDate,
+                    weightTime,
+                    id_user,
+                    id
+                } = item;
+
+                if (!subblier || !fullname || !typecarTwo || !frontPlate || !rearPlate || !product || !weightDate || !weightTime || !id_user) {
+                    throw new Error('Missing required fields');
+                }
+
+                await conn.query(
+                    `INSERT INTO regiscar_accepted
+                    (NameSupplier, FullName, TypeCar, FrontPlate, RearPlate, Product, department, \`Date\`, \`Time\` , id_user) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [subblier, fullname, typecarTwo, frontPlate, rearPlate, product, department, weightDate, weightTime, id_user]
+                );
+
+                await conn.query('DELETE FROM regiscar WHERE id = ?', [id]);
+            }
+
+            //  ต้อง ลบ ใน regis ใ้หได้
+
+            await conn.commit();
+            res.status(200).json({
+                message: 'Data inserted successfully',
+                insertedCount: dataList.length
+            });
+
+        } catch (err) {
+            await conn.rollback();
+            console.error('Database transaction error:', err);
+            res.status(500).json({ message: 'Database error', error: err.message });
+        } finally {
+            conn.release();
+        }
+
+    } catch (err) {
+        console.error('Server error:', err);
+        res.status(500).json({ message: 'Server error', error: err.message });
+    }
+});
+
+// Enpoint สำหรับ ไม่ยอมรับ จาก Admin , SupderAdmin
+app.post('/register-rejected', async (req, res) => {
+    const { id, sessionKey } = req.body;
+
+    const session = sessions[sessionKey];
+    if (!session || Date.now() > session.expireTime) {
+        return res.status(401).json({ message: 'Session expired' });
+    }
+
+    if (!id) return res.status(400).json({ message: 'Missing id' });
+
+    try {
+        await pool.query('DELETE FROM regiscar WHERE id = ?', [id]);
+        res.status(200).json({ message: 'Data deleted successfully', id: id });
+    } catch (err) {
+        console.error('Database delete error:', err);
+        res.status(500).json({ message: 'Database error', error: err.message });
+    }
+});
 
 
+// Enpoint สำหรับ User เพิ่มข้อมูลลงฐานข้อมูล Regsicar 
+app.post('/addDataMySQL', async (req, res) => {
+    const { dataList, sessionKey, username } = req.body;
 
+    const session = sessions[sessionKey];
+    if (!session || Date.now() > session.expireTime) {
+        return res.status(401).json({ message: 'Session expired' });
+    }
 
+    try {        
+        if (!Array.isArray(dataList) || dataList.length === 0) {
+            return res.status(400).json({ message: 'No Data provided' });
+        }
+        
+        const conn = await pool.getConnection(); 
+        
+        try {
+            await conn.beginTransaction();
 
+            // ค้นหา id_user จาก accounts
+            const [rows] = await conn.query(
+                `SELECT id FROM accounts WHERE username = ? LIMIT 1`, // whe use limti , ? 
+                [username]
+            );
+
+            if (rows.length === 0) {
+                throw new Error('Username not found in accounts');
+            }
+
+            const id_user = rows[0].id;
+
+            for (const item of dataList) {
+                const {
+                    subblier,
+                    fullname,
+                    typecarTwo,
+                    frontPlate,
+                    rearPlate,
+                    product,
+                    department,
+                    weightDate,
+                    weightTime
+                } = item;
+
+                if (!subblier || !fullname || !typecarTwo || !frontPlate || !rearPlate || !product || !weightDate || !weightTime) {
+                    throw new Error('Missing required fields');
+                }
+
+                await conn.query(
+                    `INSERT INTO regiscar 
+                    (NameSupplier, FullName, TypeCar, FrontPlate, RearPlate, Product, department, \`Date\`, \`Time\`, id_user) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [subblier, fullname, typecarTwo, frontPlate, rearPlate, product, department, weightDate, weightTime, id_user]
+                );
+            }
+            
+            await conn.commit();
+            res.status(200).json({ 
+                message: 'Data inserted successfully',
+                insertedCount: dataList.length 
+            });
+            
+        } catch (err) {
+            await conn.rollback();
+            console.error('Database transaction error:', err);
+            res.status(500).json({ message: 'Database error', error: err.message });
+        } finally {
+            conn.release();
+        }
+        
+    } catch (err) {
+        console.error('Server error:', err);
+        res.status(500).json({ message: 'Server error', error: err.message });
+    }
+});
 
 
 
@@ -489,7 +810,7 @@ function authenticateToken(req, res, next) {
   }
 }
 
-app.post('/login' ,loginLimiterTokenTruck , async (req, res) => { // สำหรับ ขอ Token ฝั่ง Truck 
+app.post('/login' ,loginLimiterTokenTruck , async (req, res) => { // สำหรับ login ขอ Token ฝั่ง Truck 
   const { user, password } = req.body;
 
   try {
@@ -518,10 +839,11 @@ app.post('/login' ,loginLimiterTokenTruck , async (req, res) => { // สำห�
   }
 });
 
+// get data หลังจาก ได้ Token
 app.get('/users', authenticateToken, loginLimiterTokenTruck , async (req, res) => {
   try {
     // ดึงข้อมูลทั้งหมดจาก table regiscar
-    const [rows] = await pool.query('SELECT * FROM regiscar')
+    const [rows] = await pool.query('SELECT * FROM regiscar_accepted')
 
     res.json(rows);
   } catch (err) {
@@ -536,71 +858,10 @@ app.get('/users', authenticateToken, loginLimiterTokenTruck , async (req, res) =
 
 
 
-
-
-app.post('/addDataMySQL', async (req, res) => {
-    try {
-        const dataList = req.body;
-        
-        // ตรวจสอบข้อมูล
-        if (!Array.isArray(dataList) || dataList.length === 0) {
-            return res.status(400).json({ message: 'No Data provided' });
-        }
-        
-        // เชื่อมต่อฐานข้อมูล
-        const conn = await pool.getConnection(); 
-        
-        try {
-            await conn.beginTransaction();
-            
-            // วนลูปเพื่อ insert ข้อมูล
-            for (const item of dataList) {
-                const {
-                    subblier,
-                    fullname,
-                    carNumber,
-                    product,
-                    company,
-                    weightDate,
-                    weightTime
-                } = item;
-                
-                // ตรวจสอบข้อมูลที่จำเป็น
-                if (!subblier || !fullname || !product || !company || !weightDate || !weightTime) {
-                    throw new Error('Missing required fields');
-                }
-                
-                await conn.query(
-                    `INSERT INTO regiscar (NameSupplier, FullName, NumberCar , Product, Company, \`Date\`, \`Time\`) 
-                     VALUES (?, ?, ?, ?, ?, ? , ?)`,
-                    [subblier, fullname, carNumber, product, company, weightDate, weightTime]
-                );
-            }
-            
-            await conn.commit();
-            res.status(200).json({ 
-                message: 'Data inserted successfully',
-                insertedCount: dataList.length 
-            });
-            
-        } catch (err) {
-            await conn.rollback();
-            console.error('Database transaction error:', err);
-            res.status(500).json({ message: 'Database error', error: err.message });
-        } finally {
-            conn.release();
-        }
-        
-    } catch (err) {
-        console.error('Server error:', err);
-        res.status(500).json({ message: 'Server error', error: err.message });
-    }
-});
-
-app.get('/getdataCar', async (req, res)=>{
-    const results = await pool.query('SELECT * FROM regiscar')
-    res.json(results[0])
-});
+// app.get('/getdataCar', async (req, res)=>{
+//     const results = await pool.query('SELECT * FROM regiscar')
+//     res.json(results[0])
+// });
 app.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
     console.log(`API Endpoints:`);
