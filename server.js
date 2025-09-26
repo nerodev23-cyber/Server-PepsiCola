@@ -233,7 +233,7 @@ app.post('/loginAdminandUser', loginLimiter, async (req, res) => {
             expireTime
         };
 
-         writeLog(`USER LOGIN: ${username} เข้าสู่ระบบ`);
+       //  writeLog(`USER LOGIN: ${username} เข้าสู่ระบบ`);
 
 
         // ส่งข้อมูลกลับ client
