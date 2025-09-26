@@ -8,6 +8,8 @@ const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const fs = require('fs');
+const logPath = path.join(__dirname, 'logs.txt'); // ไฟล์จะอยู่ที่โฟลเดอร์เดียวกับ server.js
 require('dotenv').config();
 
 const app = express();
@@ -49,6 +51,18 @@ const pool = mysql.createPool({
     connectionLimit: 10,
     queueLimit: 0
 });
+
+// ฟังก์ชันเขียน log
+function writeLog(message) {
+    const timestamp = new Date().toISOString(); // เวลาแบบ UTC
+    const logMessage = `[${timestamp}] ${message}\n`;
+    
+    fs.appendFile(logPath, logMessage, (err) => {
+        if (err) {
+            console.error('❌ Error writing log:', err);
+        }
+    });
+}
 
 
 // const pool = mysql.createPool({
@@ -158,9 +172,9 @@ app.post('/api/register', meddlewareRegisterUser, async (req, res) => {
 
 const loginLimiter = rateLimit({
     windowMs: 2 * 60 * 1000, // 2 นาที
-    max: 3, // จำกัด 5 ครั้งต่อ 15 นาที (เข้มงวดกว่า)
+    max: 50, // จำกัด 5 ครั้งต่อ 15 นาที (เข้มงวดกว่า)
     message: {
-        error: 'มีการพยายามเข้าสู่ระบบมากเกินไป กรุณารอ 15 นาที'
+        error: 'มีการพยายามเข้าสู่ระบบมากเกินไป กรุณารอ 2 นาที'
     },
     standardHeaders: true,
     legacyHeaders: false,
@@ -195,7 +209,7 @@ app.post('/loginAdminandUser', loginLimiter, async (req, res) => {
 
       let departmentData = null;
  // เก็บเฉพาะค่า department
- if (user.type === 'user') {
+    if (user.type === 'user') {
             departmentData = user.department;
         } else if (user.type == 'admin'){
             departmentData = user.department;
@@ -218,6 +232,9 @@ app.post('/loginAdminandUser', loginLimiter, async (req, res) => {
             supplier: user.supplier,
             expireTime
         };
+
+         writeLog(`USER LOGIN: ${username} เข้าสู่ระบบ`);
+
 
         // ส่งข้อมูลกลับ client
         res.json({
