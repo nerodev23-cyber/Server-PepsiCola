@@ -647,9 +647,9 @@ app.post('/register-accepted', async (req, res) => {
 
                 await conn.query(
                     `INSERT INTO regiscar_accepted
-                    (NameSupplier, FullName, TypeCar, FrontPlate, RearPlate, Product, department, \`Date\`, \`Time\` , id_user) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [subblier, fullname, typecarTwo, frontPlate, rearPlate, product, department, weightDate, weightTime, id_user]
+                    (NameSupplier, FullName, TypeCar, FrontPlate, RearPlate, Product, Department, \`Date\`, \`Time\` , Id_user, Status) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [subblier, fullname, typecarTwo, frontPlate, rearPlate, product, department, weightDate, weightTime, id_user, "Pending"]
                 );
 
                 await conn.query('DELETE FROM regiscar WHERE id = ?', [id]);
@@ -903,7 +903,7 @@ app.post('/users/update-status',  async (req, res) => {
 
     // อัปเดตฟิลด์ status จาก Pending → Success
     const [result] = await pool.query(
-      'UPDATE regiscar_accepted SET status = "Success" WHERE id = ? AND status = "Pending"',
+      'UPDATE regiscar_accepted SET Status = "Success" WHERE id = ? AND Status = "Pending"',
       [id]
     );
 
