@@ -15,7 +15,7 @@ require('dotenv').config();
 const app = express();
  const port = 3000;
 
-
+// รัน Server ด้วย nodemon is : npx nodemon server.js
 
 const corsOptions = {
        origin: [
@@ -181,6 +181,7 @@ const loginLimiter = rateLimit({
 });
 
 
+
 //const activeSessions = new Map();
 const sessions = {};
 
@@ -233,7 +234,7 @@ app.post('/loginAdminandUser', loginLimiter, async (req, res) => {
             expireTime
         };
 
-       //  writeLog(`USER LOGIN: ${username} เข้าสู่ระบบ`);
+         writeLog(`USER LOGIN: ${username} เข้าสู่ระบบ`);
 
 
         // ส่งข้อมูลกลับ client
@@ -376,14 +377,16 @@ app.post('/api/accept-user', async (req, res) => {
     try {
 
          await pool.query(`
-            INSERT INTO accounts (username, password_hash, supplier, type , department) 
-            VALUES (?, ?, ?, ?, ? )
+            INSERT INTO accounts (fullname, username, password_hash, supplier, type , department, phone) 
+            VALUES (?, ?, ?, ?, ?, ?,?)
         `, [
+            userData.fullname,
             userData.username,
             userData.password_hash,
             userData.supplier_name,
             'user',
             userData.department,
+            userData.phone
         ]);
 
         //  ลบ User จาก registrationsUser (หลังจาก accept แล้ว)
@@ -432,14 +435,16 @@ app.post('/api/add-admin', async (req, res) => {
 
     try {
         await pool.query(`
-            INSERT INTO accounts (username, password_hash, supplier, type, department)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO accounts (fullname, username, password_hash, supplier, type, department, phone)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         `, [
+            userData.fullname,
             userData.username,
             userData.password_hash,
             "-",            // supplier เป็น "-"
             userData.type,  // admin หรือ superadmin
-            userData.department
+            userData.department,
+            "-"
         ]);
 
         res.json({
@@ -770,28 +775,6 @@ app.post('/addDataMySQL', async (req, res) => {
 
 // ============================== Program Truck-Side ================================================================================
 
-// ทดสอบไว้ลงทะเบียน user ที่เข้ารหัสฝั่งรถบรรทุก 
-app.post('/registerforuserTruck', async (req, res) => {
-    try {
-        const { user, password } = req.body;
-
-        if (!user || !password) {
-            return res.status(400).json({ message: 'Username and password are required' });
-        }
-
-        const password_hash = await bcrypt.hash(password, 10); 
-
-        const [result] = await pool.execute(
-            'INSERT INTO userlocalprogram (user, password_hash) VALUES (?, ?)',
-            [user, password_hash]
-        );
-
-        res.status(201).json({ message: ' เพิ่มข้อมูลแล้ว', userId: result.insertId });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: 'Server error' });
-    }
-});
 
 const loginLimiterTokenTruck = rateLimit({
     windowMs: 2 * 60 * 1000, // 2 นาที
@@ -827,6 +810,31 @@ function authenticateToken(req, res, next) {
   }
 }
 
+
+// ทดสอบไว้ลงทะเบียน user ที่เข้ารหัสฝั่งรถบรรทุก ที่เข้า รหัสไว้แล้ว 
+app.post('/registerforuserTruck', async (req, res) => {
+    try {
+        const { user, password } = req.body;
+
+        if (!user || !password) {
+            return res.status(400).json({ message: 'Username and password are required' });
+        }
+
+        const password_hash = await bcrypt.hash(password, 10); 
+
+        const [result] = await pool.execute(
+            'INSERT INTO userlocalprogram (user, password_hash) VALUES (?, ?)',
+            [user, password_hash]
+        );
+
+        res.status(201).json({ message: ' เพิ่มข้อมูลแล้ว', userId: result.insertId });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+
 app.post('/login' ,loginLimiterTokenTruck , async (req, res) => { // สำหรับ login ขอ Token ฝั่ง Truck 
   const { user, password } = req.body;
 
@@ -839,10 +847,17 @@ app.post('/login' ,loginLimiterTokenTruck , async (req, res) => { // สำห�
     const dbUser = rows[0];
 
     // เข้ารหัส
-    const match = await bcrypt.compare(password, dbUser.password_hash);
-    if (!match) {
+    // const match = await bcrypt.compare(password, dbUser.password_hash);
+    // if (!match) {
+    //   return res.status(401).json({ message: 'Invalid password' });
+    // }
+
+    // ไม่ต้องเข้าหรัส
+    if (password !== dbUser.password_hash) { // ถ้าเปลี่ยนชื่อ column เป็น password ให้ใช้ dbUser.password
       return res.status(401).json({ message: 'Invalid password' });
     }
+
+
     const token = jwt.sign(
       { id: dbUser.id, user: dbUser.user },
       process.env.JWT_SECRET,
@@ -869,8 +884,57 @@ app.get('/users', authenticateToken, loginLimiterTokenTruck , async (req, res) =
   }
 });
 
+
+
 // ============================== Program Truck-Side END ===============================================================================
 
+
+// สำสรับดึงข้อมูลทะเบียนรถให้พี่กริน
+app.post('/querygetdatacar', async (req, res) => {
+  try {
+    const { FrontPlate, RearPlate } = req.body; // อ่านจาก JSON body
+
+    // ตรวจสอบว่ามีค่าอย่างน้อยหนึ่งค่า
+    if (!FrontPlate && !RearPlate) {
+      return res.status(400).json({ message: 'Please provide FrontPlate or RearPlate for search' });
+    }
+
+    let query = 'SELECT * FROM regiscar_accepted WHERE 1=1'; //  1=1 เป็นเงื่อนไขที่ เป็นจริงเสมอ
+    const params = [];  // สร้าง array ว่าง เพื่อเก็บค่า parameter ที่จะใส่ใน SQL query
+
+    if (FrontPlate) {
+      query += ' AND FrontPlate = ?';
+      params.push(FrontPlate);
+    }
+
+    if (RearPlate) {
+      query += ' AND RearPlate = ?';
+      params.push(RearPlate);
+    }
+
+    const [rows] = await pool.query(query, params);
+
+    if(rows.length === 0) {
+        return res.status(404).json({message: 'ไม่มีข้อมูลป้ายทะเบียนนี้ในฐานข้อมูล'});
+    }
+
+    res.json(rows); // ส่งออกข้อมูลทั้งหมดที่ค้นเจอ
+
+    /** มันจะได้ query แบบนี้ SELECT * FROM regiscar_accepted WHERE 1=1 AND FrontPlate = ? AND RearPlate = ? 
+      
+      # การใช้งานของ query แบบนี้ 
+        let query = 'SELECT * FROM regiscar_accepted WHERE 1=1';
+        query += ' AND FrontPlate = ?';
+        query += ' AND RearPlate = ?';
+
+      
+     */
+
+  } catch (err) {
+    console.error("Database error:", err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
 
 
