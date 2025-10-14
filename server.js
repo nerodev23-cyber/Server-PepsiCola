@@ -591,10 +591,15 @@ app.post('/user/get-btnViewPendingOrders', async (req, res) => {
         const id_user = accountRows[0].id;
 
         // ดึงข้อมูลจาก regiscar_accepted ของ user นี้
+        // const [regiscarRows] = await pool.query(
+        //     'SELECT * FROM regiscar_accepted WHERE id_user = ?',
+        //     [id_user]
+        // );
         const [regiscarRows] = await pool.query(
-            'SELECT * FROM regiscar_accepted WHERE id_user = ?',
-            [id_user]
-        );
+    'SELECT * FROM regiscar_accepted WHERE id_user = ? AND Status != "Success"',
+    [id_user]
+);
+
 
         res.json({
             success: true,
