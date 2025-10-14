@@ -10,6 +10,8 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 const logPath = path.join(__dirname, 'logs.txt'); // ไฟล์จะอยู่ที่โฟลเดอร์เดียวกับ server.js
+
+
 require('dotenv').config();
 
 const app = express();
@@ -37,7 +39,8 @@ app.use(express.json());
 app.use(cors(corsOptions));
 app.use(cookieParser());
 
-app.use(express.static(path.join(__dirname, 'public'))); // บอก Express ว่า public เป็น folder ของไฟล์เว็บที่ browser สามารถเข้าถึงได้โดยตรง”
+ app.use(express.static(path.join(__dirname, 'public'))); // บอก Express ว่า public เป็น folder ของไฟล์เว็บที่ browser สามารถเข้าถึงได้โดยตรง”
+
 
 
 const pool = mysql.createPool({
@@ -53,15 +56,17 @@ const pool = mysql.createPool({
 });
 
 // ฟังก์ชันเขียน log
+// สร้างโฟลเดอร์ถ้ายังไม่มี
 function writeLog(message) {
-    const timestamp = new Date().toISOString(); // เวลาแบบ UTC
+    const timestamp = new Date().toISOString();
     const logMessage = `[${timestamp}] ${message}\n`;
-    
-    fs.appendFile(logPath, logMessage, (err) => {
-        if (err) {
-            console.error('❌ Error writing log:', err);
-        }
-    });
+
+    try {
+        fs.appendFileSync(logPath, logMessage, 'utf8');
+        console.log('✅ Log saved:', logMessage.trim());
+    } catch (err) {
+        console.error('❌ Error writing log:', err.message);
+    }
 }
 
 
@@ -234,9 +239,8 @@ app.post('/loginAdminandUser', loginLimiter, async (req, res) => {
             expireTime
         };
 
+
          writeLog(`USER LOGIN: ${username} เข้าสู่ระบบ`);
-
-
         // ส่งข้อมูลกลับ client
         res.json({
             message: 'Login สำเร็จ',
@@ -254,6 +258,7 @@ app.post('/loginAdminandUser', loginLimiter, async (req, res) => {
         console.log('Login successful:', user.username); // Debug
 
     } catch (err) {
+        writeLog(`LOGIN ERROR: ${username} -> ${err.message}`);
         console.error('Server Error:', err);
         res.status(500).json({ message: 'Server Error' });
     }
