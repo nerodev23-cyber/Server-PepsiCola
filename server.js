@@ -954,10 +954,10 @@ app.post('/users/update-status', async (req, res) => {
 // สำสรับดึงข้อมูลทะเบียนรถให้พี่กริน
 app.post('/querygetdatacar', async (req, res) => {
   try {
-    const { FrontPlate, RearPlate , status } = req.body; // อ่านจาก JSON body
+    const { FrontPlate, RearPlate , Status } = req.body; // อ่านจาก JSON body
 
     // ตรวจสอบว่ามีค่าอย่างน้อยหนึ่งค่า
-    if (!FrontPlate && !RearPlate && !status) {
+    if (!FrontPlate && !RearPlate && !Status) {
       return res.status(400).json({ message: 'Please provide FrontPlate or RearPlate for search' });
     }
 
@@ -975,9 +975,9 @@ app.post('/querygetdatacar', async (req, res) => {
     }
 
     //  เพิ่มเงื่อนไข status
-     if (status) {
-      query += ' AND status = ?';   
-      params.push(status);
+     if (Status) {
+      query += ' AND Status = ?';   
+      params.push(Status);
     }
 
     const [rows] = await pool.query(query, params);
