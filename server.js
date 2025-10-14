@@ -52,7 +52,8 @@ const pool = mysql.createPool({
     ssl: { rejectUnauthorized: true }, // ต้องใส่ ssl สำหรับ TiDB
     waitForConnections: true,
     connectionLimit: 10,
-    queueLimit: 0
+    queueLimit: 0,
+    dateStrings: true
 });
 
 // ฟังก์ชันเขียน log
@@ -545,7 +546,7 @@ app.post('/user/get-btnViewRegisteredData', async (req, res) => {
 
         const id_user = accountRows[0].id;
 
-        // ดึงข้อมูลจาก regiscar ของ user นี้
+       // ดึงข้อมูลจาก regiscar ของ user นี้
         const [regiscarRows] = await pool.query(
             'SELECT * FROM regiscar WHERE id_user = ?',
             [id_user]
@@ -890,6 +891,35 @@ app.get('/users', authenticateToken, loginLimiterTokenTruck , async (req, res) =
 });
 
 
+// เปลี่ยน status
+
+app.post('/users/update-status',  async (req, res) => {
+  try {
+    const { id } = req.body; // รับ id ของแถวที่ต้องการอัปเดต
+
+    if (!id) {
+      return res.status(400).json({ message: 'กรุณาระบุ id ของข้อมูลที่ต้องการอัปเดต' });
+    }
+
+    // อัปเดตฟิลด์ status จาก Pending → Success
+    const [result] = await pool.query(
+      'UPDATE regiscar_accepted SET status = "Success" WHERE id = ? AND status = "Pending"',
+      [id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'ไม่พบข้อมูลที่เป็น Pending ตาม id ที่ระบุ' });
+    }
+
+    res.json({ message: 'อัปเดตสถานะสำเร็จ', id, newStatus: 'Success' });
+  } catch (err) {
+    console.error('❌ Database error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
+
 
 // ============================== Program Truck-Side END ===============================================================================
 
@@ -926,7 +956,7 @@ app.post('/querygetdatacar', async (req, res) => {
     const [rows] = await pool.query(query, params);
 
     if(rows.length === 0) {
-        return res.status(404).json({message: 'ไม่มีข้อมูลป้ายทะเบียนนี้ในฐานข้อมูล'});
+        return res.status(202).json({message: 'ไม่มีข้อมูลป้ายทะเบียนนี้ในฐานข้อมูล'});
     }
 
     res.json(rows); // ส่งออกข้อมูลทั้งหมดที่ค้นเจอ
@@ -950,10 +980,12 @@ app.post('/querygetdatacar', async (req, res) => {
 
 
 
-// app.get('/getdataCar', async (req, res)=>{
-//     const results = await pool.query('SELECT * FROM regiscar')
-//     res.json(results[0])
-// });
+app.get('/getdataCar', async (req, res)=>{
+    const results = await pool.query('SELECT * FROM regiscar')
+    res.json(results[0])
+});
+
+
 app.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
     console.log(`API Endpoints:`);
