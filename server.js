@@ -678,7 +678,7 @@ app.post('/register-accepted', async (req, res) => {
 });
 
 // Enpoint สำหรับ ไม่ยอมรับ จาก Admin , SupderAdmin
-app.post('/register-rejected', async (req, res) => {
+app.post('/register-rejected', async (req, res) => { 
     const { id, sessionKey } = req.body;
 
     const session = sessions[sessionKey];
@@ -892,12 +892,12 @@ app.get('/users', authenticateToken, loginLimiterTokenTruck , async (req, res) =
 
 
 // เปลี่ยน status
-
+/*
 app.post('/users/update-status',  async (req, res) => {
   try {
-    const { id } = req.body; // รับ id ของแถวที่ต้องการอัปเดต
+    const { id , Status } = req.body; // รับ id ของแถวที่ต้องการอัปเดต
 
-    if (!id) {
+    if (!id && !Status) {
       return res.status(400).json({ message: 'กรุณาระบุ id ของข้อมูลที่ต้องการอัปเดต' });
     }
 
@@ -912,6 +912,33 @@ app.post('/users/update-status',  async (req, res) => {
     }
 
     res.json({ message: 'อัปเดตสถานะสำเร็จ', id, newStatus: 'Success' });
+  } catch (err) {
+    console.error('❌ Database error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+*/
+
+app.post('/users/update-status', async (req, res) => {
+  try {
+    const { Id, Status } = req.body; // รับ id และค่า Status จาก body
+
+    // ตรวจสอบว่ามีค่าครบไหม
+    if (!Id || !Status) {
+      return res.status(400).json({ message: 'กรุณาระบุ id และ Status ที่ต้องการอัปเดต' });
+    }
+
+    // อัปเดตค่า Status ด้วยค่าที่ส่งมา
+    const [result] = await pool.query(
+      'UPDATE regiscar_accepted SET Status = ? WHERE id = ?',
+      [Status, Id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'ไม่พบข้อมูลตาม id ที่ระบุ' });
+    }
+
+    res.json({ message: 'อัปเดตสถานะสำเร็จ', Id, newStatus: Status });
   } catch (err) {
     console.error('❌ Database error:', err);
     res.status(500).json({ message: 'Server error' });
