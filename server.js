@@ -650,11 +650,14 @@ app.post('/register-accepted', async (req, res) => {
                     throw new Error('Missing required fields');
                 }
 
+                   //  ตัดเครื่องหมาย "-" ออกจาก frontPlate เพื่อเอา ค่าจากที่ตัดมาได้ใส่ฟิล frontPlateShort
+                const frontPlateShort = frontPlate.replace(/-/g, '');
+
                 await conn.query(
                     `INSERT INTO regiscar_accepted
-                    (NameSupplier, FullName, TypeCar, FrontPlate, RearPlate, Product, Department, \`Date\`, \`Time\` , Id_user, Status) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [subblier, fullname, typecarTwo, frontPlate, rearPlate, product, department, weightDate, weightTime, id_user, "Planning"]
+                    (NameSupplier, FullName, TypeCar, FrontPlate, RearPlate, FrontPlateShort, Product, Department, \`Date\`, \`Time\` , Id_user, Status) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [subblier, fullname, typecarTwo, frontPlate, rearPlate, frontPlateShort, product, department, weightDate, weightTime, id_user, "Planning"]
                 );
 
                 await conn.query('DELETE FROM regiscar WHERE id = ?', [id]);
