@@ -651,7 +651,9 @@ app.post('/register-accepted', async (req, res) => {
                 }
 
                    //  ตัดเครื่องหมาย "-" ออกจาก frontPlate เพื่อเอา ค่าจากที่ตัดมาได้ใส่ฟิล frontPlateShort
-                const frontPlateShort = frontPlate.replace(/-/g, '');
+                //const frontPlateShort = frontPlate.replace(/-/g, '');
+                const frontPlateShort = frontPlate.replace(/[-\s]/g, '');
+
 
                 await conn.query(
                     `INSERT INTO regiscar_accepted
@@ -960,57 +962,91 @@ app.post('/users/update-status', async (req, res) => {
 
 
 // สำสรับดึงข้อมูลทะเบียนรถให้พี่กริน
+// app.post('/querygetdatacar', async (req, res) => {
+//   try {
+//     const { FrontPlateShort, Status } = req.body; // ✅ รับเฉพาะ 2 ฟิลด์ที่ต้องการ
+
+//     // ตรวจสอบว่ามีค่าอย่างน้อยหนึ่งค่า
+//     if (!FrontPlateShort && !Status) {
+//       return res.status(400).json({ message: 'Please provide FrontPlateShort or Status for search' });
+//     }
+
+//     let query = 'SELECT * FROM regiscar_accepted WHERE 1=1';
+//     const params = [];
+
+//     if (FrontPlateShort) {
+//       query += ' AND FrontPlateShort = ?';
+//       params.push(FrontPlateShort);
+//     }
+
+//     if (Status) {
+//       query += ' AND Status = ?';
+//       params.push(Status);
+//     }
+
+//     const [rows] = await pool.query(query, params);
+
+//     if (rows.length === 0) {
+//       return res.status(202).json({ message: 'ไม่มีข้อมูลป้ายทะเบียนนี้ในฐานข้อมูล' });
+//     }
+
+//     res.status(200).json({const:rows.length,message : rows});
+
+//   } catch (err) {
+//     console.error("Database error:", err);
+//     res.status(500).json({ message: 'Server error', error: err.message });
+//   }
+// });
+
 app.post('/querygetdatacar', async (req, res) => {
   try {
-    const { FrontPlate, RearPlate , Status } = req.body; // อ่านจาก JSON body
+    const { FrontPlateShort, Status } = req.body; 
 
     // ตรวจสอบว่ามีค่าอย่างน้อยหนึ่งค่า
-    if (!FrontPlate && !RearPlate && !Status) {
-      return res.status(400).json({ message: 'Please provide FrontPlate or RearPlate for search' });
+    if (!FrontPlateShort && !Status) {
+      return res.status(400).json({ message: 'Please provide FrontPlateShort or Status for search' });
     }
 
-    let query = 'SELECT * FROM regiscar_accepted WHERE 1=1'; //  1=1 เป็นเงื่อนไขที่ เป็นจริงเสมอ
-    const params = [];  // สร้าง array ว่าง เพื่อเก็บค่า parameter ที่จะใส่ใน SQL query
+    // ✅ ใช้วันที่ปัจจุบัน (รูปแบบ YYYY-MM-DD)
+    const currentDate = new Date().toISOString().slice(0, 10);
 
-    if (FrontPlate) {
-      query += ' AND FrontPlate = ?';
-      params.push(FrontPlate);
+    let query = 'SELECT * FROM regiscar_accepted WHERE 1=1';
+    const params = [];
+
+    if (FrontPlateShort) {
+      query += ' AND FrontPlateShort = ?';
+      params.push(FrontPlateShort);
     }
 
-    if (RearPlate) {
-      query += ' AND RearPlate = ?';
-      params.push(RearPlate);
-    }
-
-    //  เพิ่มเงื่อนไข status
-     if (Status) {
-      query += ' AND Status = ?';   
+    if (Status) {
+      query += ' AND Status = ?';
       params.push(Status);
     }
 
+    // ✅ กรองข้อมูลตามวันปัจจุบันอัตโนมัติ
+    query += ' AND DATE(`Date`) = ?';
+    params.push(currentDate);
+
     const [rows] = await pool.query(query, params);
 
-    if(rows.length === 0) {
-        return res.status(202).json({message: 'ไม่มีข้อมูลป้ายทะเบียนนี้ในฐานข้อมูล'});
+    if (rows.length === 0) {
+      return res.status(202).json({ message: `ไม่มีข้อมูลของวันที่ ${currentDate} ในฐานข้อมูล` });
     }
 
-    res.json(rows); // ส่งออกข้อมูลทั้งหมดที่ค้นเจอ
+    // res.status(200).json({
+    //   date: currentDate,
+    //   count: rows.length,
+    //   message: rows
+    // });
 
-    /** มันจะได้ query แบบนี้ SELECT * FROM regiscar_accepted WHERE 1=1 AND FrontPlate = ? AND RearPlate = ? 
-      
-      # การใช้งานของ query แบบนี้ 
-        let query = 'SELECT * FROM regiscar_accepted WHERE 1=1';
-        query += ' AND FrontPlate = ?';
-        query += ' AND RearPlate = ?';
-
-      
-     */
+    res.status(200).json({const:rows.length,message : rows});
 
   } catch (err) {
     console.error("Database error:", err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
+
 
 
 
