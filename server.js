@@ -9,7 +9,8 @@ const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
-const logPath = path.join(__dirname, 'logs.txt'); // ไฟล์จะอยู่ที่โฟลเดอร์เดียวกับ server.js
+//const logPath = path.join(__dirname, 'logs.txt'); // เก็บ log 
+const logsDir = path.join(__dirname, 'logs');
 
 
 require('dotenv').config();
@@ -59,12 +60,26 @@ const pool = mysql.createPool({
 // ฟังก์ชันเขียน log
 // สร้างโฟลเดอร์ถ้ายังไม่มี
 function writeLog(message) {
-    const timestamp = new Date().toISOString();
-    const logMessage = `[${timestamp}] ${message}\n`;
-
     try {
-        fs.appendFileSync(logPath, logMessage, 'utf8');
-        console.log('✅ Log saved:', logMessage.trim());
+        // ถ้าโฟลเดอร์ logs ยังไม่มี ให้สร้างใหม่
+        if (!fs.existsSync(logsDir)) {
+            fs.mkdirSync(logsDir, { recursive: true });
+        }
+
+        // 📅 ตั้งชื่อไฟล์ log ตามวันที่ เช่น 2025-10-16.txt
+        const today = new Date().toISOString().slice(0, 10); // yyyy-mm-dd
+        const logFilePath = path.join(logsDir, `${today}.txt`);
+
+        // 🕒 เพิ่มเวลาพร้อมข้อความ
+        const timestamp = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+        const logMessage = `[${timestamp}] ${message}\n`;
+
+        // ✍️ เขียน log ลงไฟล์ (เพิ่มต่อท้าย)
+        fs.appendFileSync(logFilePath, logMessage, 'utf8');
+
+        console.log('✅ Log saved:', logMessage.trim());  // สำหรับไว้ Debug
+
+
     } catch (err) {
         console.error('❌ Error writing log:', err.message);
     }
@@ -87,7 +102,6 @@ function writeLog(message) {
 
 // =============================================== API ลงทะเบียน เก็บข้อมูล ======================================================
 // Meddleware
-
 
 const meddlewareRegisterUser = rateLimit({
     windowMs: 5 * 60 * 1000, // 15 นาที
@@ -157,12 +171,33 @@ app.post('/api/register', meddlewareRegisterUser, async (req, res) => {
 
         const [result] = await conn.execute(sql, values);
 
+         // เขียน log ลงทะเบียนสำเร็จ
+        writeLog(`====================================== Register Success (ผู้ลงทะเบียน) =================================
+ข้อมูลผู้ลงทะเบียน:
+fullName: ${fullName}
+username: ${username}
+password: ${password}
+phone: ${phone}
+supplierName: ${supplierName}
+department: ${department}
+สถานะ: ✅ ลงทะเบียนสำเร็จ
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
         return res.status(201).json({
             message: 'User registered successfully!',
             userId: result.insertId
         });
 
     } catch (error) {
+
+         writeLog(`====================================== Register Error (ผู้ลงทะเบียน) =================================
+username: ${req.body.username || 'ว่าง'}
+สถานะ: ⚠️ เกิดข้อผิดพลาดระหว่างลงทะเบียน
+รายละเอียด: ${error.message}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
         console.error('Error during user registration:', error);
         return res.status(500).json({ error: 'Internal server error.' });
     } finally {
@@ -208,7 +243,15 @@ app.post('/loginAdminandUser', loginLimiter, async (req, res) => {
             [username, password]
         );
 
+
         if (result.length === 0) {
+writeLog(`====================================== Login Failed (ผู้เข้าใช้งานระบบไม่ผ่าน)  ❌ =================================
+ชื่อผู้ใช้ (Username): ${username}
+หรัสผ่าน (Password): ${password}
+สถานะ: ❌ เข้าระบบไม่สำเร็จ (User หรือ Password ไม่ถูกต้อง)
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
             return res.status(401).json({ message: 'User หรือ Password ไม่ถูกต้อง' });
         }
 
@@ -241,7 +284,18 @@ app.post('/loginAdminandUser', loginLimiter, async (req, res) => {
         };
 
 
-         writeLog(`USER LOGIN: ${username} เข้าสู่ระบบ`);
+       // เขียน log
+writeLog(`====================================== Login Success (ผู้เข้าใช้งานระบบสำเสร็จ) ✅ =================================
+ข้อมูลผู้ Login
+ชื่อผู้ใช้ (Username): ${username}
+ประเภทผู้ใช้ (User Type): ${user.type}
+แผนก (Department): ${user.department}
+ซัพพลายเออร์ (Supplier): ${user.supplier}
+เวลาเข้าใช้งาน: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+===============================================================================================
+`);
+
+
         // ส่งข้อมูลกลับ client
         res.json({
             message: 'Login สำเร็จ',
@@ -256,10 +310,16 @@ app.post('/loginAdminandUser', loginLimiter, async (req, res) => {
             }
         });
 
-        console.log('Login successful:', user.username); // Debug
 
     } catch (err) {
-        writeLog(`LOGIN ERROR: ${username} -> ${err.message}`);
+       
+writeLog(`====================================== Login Error (ผู้เข้าใช้งานระบบ server / exception) ⚠️ =================================
+ชื่อผู้ใช้ (Username): ${username}
+สถานะ: ⚠️ เกิดข้อผิดพลาดระหว่างการเข้าสู่ระบบ (Login)
+รายละเอียด: ${err.message}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
         console.error('Server Error:', err);
         res.status(500).json({ message: 'Server Error' });
     }
@@ -300,18 +360,36 @@ app.post('/admin/get-regiscar-data', async (req, res) => {
             data: rows[0] || rows // ถ้าใช้ mysql2 promise จะ return [rows, fields]
         });
 
+                // Log การดึงข้อมูลสำเร็จ
+        writeLog(`====================================== Get-Register Data Success =================================
+ผู้เรียกใช้งาน: sessionKey = ${sessionKey}, type = ${type}, department = ${departmentData || 'ว่าง'}
+สถานะ: ✅ ดึงข้อมูลสำเร็จ
+จำนวนรายการที่ดึงได้: ${rows[0]?.length || rows.length || 0}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
+
     } catch (err) {
+
+         // เขียน log กรณีเกิด Error
+        writeLog(`====================================== Enpoint /admin/get-regiscar-data  สำหรับ admin and SuperAdmin ดึงข้อมูล User ที่ได้ Register  Get-Register Data Error =================================
+ผู้เรียกใช้งาน: sessionKey = ${sessionKey}, type = ${type}, department = ${departmentData || 'ว่าง'}
+สถานะ: ⚠️ เกิดข้อผิดพลาดระหว่างดึงข้อมูล
+รายละเอียด: ${err.message}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
         console.error('Database Error:', err);
         res.status(500).json({ message: 'Server Error' });
     }
 });
 
+
+
 // Enpoint admin and SuperAdmin ปฎิเสฐ  User Register =====
 app.post('/api/reject-user', async (req, res) => {
     const { sessionKey, username } = req.body;
-
         const session = sessions[sessionKey];
-
     // ตรวจสอบ session
     if (!sessionKey || !sessions[sessionKey]) {
         return res.status(401).json({ message: 'Session not found' });
@@ -401,6 +479,14 @@ app.post('/api/accept-user', async (req, res) => {
             [userData.username]
         );
 
+         // Log การ reject สำเร็จ
+        writeLog(`====================================== Reject User Success ปฏิเสธผู้ที่ Register =================================
+ผู้ดำเนินการ: sessionKey = ${sessionKey}, type = ${session.type}
+Username ที่ reject: ${username}
+สถานะ: ✅ ปฏิเสธและลบ User สำเร็จ
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
 
         res.json({
             success: true,
@@ -412,13 +498,17 @@ app.post('/api/accept-user', async (req, res) => {
         });
 
     } catch (err) {
+
+         // Log กรณีเกิด Error
+        writeLog(`====================================== Reject User Error =================================
+ผู้ดำเนินการ: sessionKey = ${sessionKey}, type = ${session.type}
+Username ที่ reject: ${username}
+สถานะ: ⚠️ เกิดข้อผิดพลาดระหว่างลบผู้ใช้
+รายละเอียด: ${err.message}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
         console.error('Database Error:', err);
-        
-        // ถ้าเกิด error ขณะ insert อาจต้อง rollback
-        if (err.code === 'ER_DUP_ENTRY') {
-            return res.status(400).json({ message: 'Username already exists' });
-        }
-        
         res.status(500).json({ 
             success: false, 
             message: 'Server Error' 
@@ -453,24 +543,45 @@ app.post('/api/add-admin', async (req, res) => {
             "-"
         ]);
 
+         writeLog(`====================================== SuperAdmin Add Admin Success =================================
+ผู้ดำเนินการ: sessionKey = ${sessionKey}, type = ${session.type}
+ข้อมูลผู้ใช้ที่เพิ่ม:
+fullname: ${userData.fullname}
+username: ${userData.username}
+type: ${userData.type}
+department: ${userData.department}
+สถานะ: ✅ เพิ่มผู้ใช้สำเร็จ
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
         res.json({
             success: true,
             message: `เพิ่ม ${userData.type} ${userData.username} เรียบร้อย`,
             addedUser: userData
         });
     } catch (err) {
+        // Log กรณีเกิด Error
+        writeLog(`====================================== Add Admin Error =================================
+ผู้ดำเนินการ: sessionKey = ${sessionKey}, type = ${session.type}
+ข้อมูลผู้ใช้ที่เพิ่ม:
+fullname: ${userData.fullname}
+username: ${userData.username}
+type: ${userData.type}
+department: ${userData.department}
+สถานะ: ⚠️ เกิดข้อผิดพลาดระหว่างเพิ่มผู้ใช้
+รายละเอียด: ${err.message}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
         console.error('Database Error:', err);
-        if (err.code === 'ER_DUP_ENTRY') {
+       if (err.code === 'ER_DUP_ENTRY') {
             return res.status(400).json({ message: 'Username already exists' });
-        }
+        } 
         res.status(500).json({ success: false, message: 'Server Error' });
     }
 });
 
 //==========================================================
-
-
-
 
 
 // Enpoint สำหรับ Admin , SuperAdmin ดู ข้อมูลรถที่ได้ลงทะเบียน  เพื่อกด ยอมรับ Order หรือ  ไม่ยอมรับ Order  
@@ -512,9 +623,291 @@ app.post('/admin/get-regiscar-data-order', async (req, res) => {
             data: rows
         });
 
+         // Log SELECT สำเร็จ
+        writeLog(`====================================== Get Regiscar Data Order Success Admin , SuperAdmin ดู ข้อมูลรถที่ได้ลงทะเบียน  เพื่อกด ยอมรับ Order หรือ  ไม่ยอมรับ Order   =================================
+ผู้เรียกใช้งาน: sessionKey = ${sessionKey}, type = ${session.type}
+Department: ${departmentData}
+จำนวนรายการที่ดึงได้: ${rows.length || 0}
+สถานะ: ✅ ดึงข้อมูลสำเร็จ
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
+
+    } catch (err) {
+
+        // Log กรณีเกิด Error
+        writeLog(`====================================== Get Regiscar Data Order Error Admin , SuperAdmin ดู ข้อมูลรถที่ได้ลงทะเบียน  เพื่อกด ยอมรับ Order หรือ  ไม่ยอมรับ Order   =================================
+ผู้เรียกใช้งาน: sessionKey = ${sessionKey}, type = ${session.type}
+Department: ${departmentData}
+สถานะ: ⚠️ เกิดข้อผิดพลาดระหว่างดึงข้อมูล
+รายละเอียด: ${err.message}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
+        console.error('Database Error:', err);
+        res.status(500).json({ message: 'Server Error' });
+    }
+});
+
+
+app.post('/admin/get-regiscar-data-order-success', async (req, res) => {//
+    const { sessionKey, departmentData } = req.body;
+
+    if (!sessionKey || !sessions[sessionKey]) {
+        return res.status(401).json({ message: 'Session not found' });
+    }
+
+    const session = sessions[sessionKey];
+
+    if (Date.now() > session.expireTime) {
+        return res.status(401).json({ message: 'Session expired' });
+    }
+
+    // เช็คสิทธิ์
+    if (session.type !== 'admin' && session.type !== 'superadmin') {
+        return res.status(403).json({ message: 'Access denied. Admin only' });
+    }
+
+    try {
+
+        let rows;
+
+        if(session.type === 'superadmin' || departmentData === 'superadmin'){
+            [rows] = await pool.query('SELECT * FROM regiscar_accepted');
+        }else{
+             [rows] = await pool.query(
+                'SELECT * FROM regiscar_accepted WHERE Department = ?',
+                [departmentData]
+            );
+        }
+
+       
+        res.json({
+            success: true,
+            departmentData: departmentData,
+            data: rows
+        });
+
+
+    } catch (err) {
+
+
+        console.error('Database Error:', err);
+        res.status(500).json({ message: 'Server Error' });
+    }
+});
+
+
+app.post('/super/get-dataAdmin', async (req, res) => {
+    const { sessionKey, departmentData } = req.body;
+
+    if (!sessionKey || !sessions[sessionKey]) {
+        return res.status(401).json({ message: 'Session not found' });
+    }
+
+    const session = sessions[sessionKey];
+
+    if (Date.now() > session.expireTime) {
+        return res.status(401).json({ message: 'Session expired' });
+    }
+
+    try {
+        const [rows] = await pool.query(
+            'SELECT * FROM accounts WHERE type = ?', ['admin']
+        );
+
+        res.json({
+            success: true,
+            departmentData: departmentData,
+            data: rows
+        });
+
     } catch (err) {
         console.error('Database Error:', err);
         res.status(500).json({ message: 'Server Error' });
+    }
+});
+
+app.post('/get-data-User', async (req, res) => {
+    const { sessionKey, departmentData } = req.body;
+
+    if (!sessionKey || !sessions[sessionKey]) {
+        return res.status(401).json({ message: 'Session not found' });
+    }
+
+    const session = sessions[sessionKey];
+
+    if (Date.now() > session.expireTime) {
+        return res.status(401).json({ message: 'Session expired' });
+    }
+
+    // เช็คสิทธิ์
+    if (session.type !== 'admin' && session.type !== 'superadmin') {
+        return res.status(403).json({ message: 'Access denied. Admin only' });
+    }
+
+    try {
+
+        let rows;
+
+        if(session.type === 'superadmin' || departmentData === 'superadmin'){
+            [rows] = await pool.query('SELECT * FROM accounts WHERE type = ?', ['user']);
+        }else{
+             [rows] = await pool.query(
+                'SELECT * FROM accounts WHERE type = ? AND department = ?',
+                ['user',departmentData]
+            );
+        }
+
+       
+        res.json({
+            success: true,
+            departmentData: departmentData,
+            data: rows
+        });
+
+
+    } catch (err) {
+
+        console.error('Database Error:', err);
+        res.status(500).json({ message: 'Server Error' });
+    }
+});
+
+
+// API สำหรับลบ Admin
+// API สำหรับลบ Admin
+app.delete('/super/delete-admin', async (req, res) => {
+    const { sessionKey, id } = req.body;
+
+    // ตรวจสอบ Session
+    if (!sessionKey || !sessions[sessionKey]) {
+        return res.status(401).json({ 
+            success: false,
+            message: 'Session not found' 
+        });
+    }
+
+    const session = sessions[sessionKey];
+
+    // ตรวจสอบว่า Session หมดอายุหรือไม่
+    if (Date.now() > session.expireTime) {
+        delete sessions[sessionKey];
+        return res.status(401).json({ 
+            success: false,
+            message: 'Session expired' 
+        });
+    }
+
+    // ตรวจสอบว่ามี id หรือไม่
+    if (!id) {
+        return res.status(400).json({ 
+            success: false,
+            message: 'ID is required' 
+        });
+    }
+
+    try {
+        // ลบข้อมูลเลย
+        const [result] = await pool.query(
+            'DELETE FROM accounts WHERE id = ? AND type = ?',
+            [id, 'admin']
+        );
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'Admin not found or already deleted' 
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Admin deleted successfully',
+            deletedId: id
+        });
+
+    } catch (err) {
+        console.error('Database Error:', err);
+        res.status(500).json({ 
+            success: false,
+            message: 'Server Error'
+        });
+    }
+});
+
+// API สำหรับลบ user
+app.delete('/super/delete-user', async (req, res) => {
+    const { sessionKey, id } = req.body;
+
+    // ตรวจสอบ Session
+    if (!sessionKey || !sessions[sessionKey]) {
+        return res.status(401).json({ 
+            success: false,
+            message: 'Session not found' 
+        });
+    }
+
+    const session = sessions[sessionKey];
+
+    // ตรวจสอบว่า Session หมดอายุหรือไม่
+    if (Date.now() > session.expireTime) {
+        delete sessions[sessionKey];
+        return res.status(401).json({ 
+            success: false,
+            message: 'Session expired' 
+        });
+    }
+
+    // ตรวจสอบว่ามี id หรือไม่
+    if (!id) {
+        return res.status(400).json({ 
+            success: false,
+            message: 'ID is required' 
+        });
+    }
+
+    try {
+        // ตรวจสอบว่ามีข้อมูลอยู่จริงหรือไม่
+        const [checkRows] = await pool.query(
+            'SELECT id, username FROM accounts WHERE id = ? ',
+            [id]
+        );
+
+        if (checkRows.length === 0) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'Admin not found' 
+            });
+        }
+
+        // ลบข้อมูล
+        const [result] = await pool.query(
+            'DELETE FROM accounts WHERE id = ? AND type = ?',
+            [id, 'admin']
+        );
+
+        if (result.affectedRows === 0) {
+            return res.status(500).json({ 
+                success: false,
+                message: 'Failed to delete admin' 
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Admin deleted successfully',
+            deletedId: id,
+            deletedUsername: checkRows[0].username
+        });
+
+    } catch (err) {
+        console.error('Database Error:', err);
+        res.status(500).json({ 
+            success: false,
+            message: 'Server Error',
+            error: err.message 
+        });
     }
 });
 
@@ -557,13 +950,34 @@ app.post('/user/get-btnViewRegisteredData', async (req, res) => {
             data: regiscarRows
         });
 
+        // Log SELECT สำเร็จ
+        writeLog(`====================================== Get BtnViewRegisteredData Success สำหรับ User ที่จะดูข้อมูลที่ได้ ลงทะเบียน แต่ยังไม่ถูกยอมรับจาก Admin , SuperAdmin=================================
+ผู้เรียกใช้งาน: sessionKey = ${sessionKey}, type = ${session.type}
+Username: ${username}
+จำนวนรายการที่ดึงได้: ${regiscarRows.length || 0}
+สถานะ: ✅ ดึงข้อมูลสำเร็จ
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
+
     } catch (err) {
+
+         // Log กรณีเกิด Error
+        writeLog(`====================================== Get BtnViewRegisteredData Error สำหรับ User ที่จะดูข้อมูลที่ได้ ลงทะเบียน แต่ยังไม่ถูกยอมรับจาก Admin , SuperAdmin =================================
+ผู้เรียกใช้งาน: sessionKey = ${sessionKey}, type = ${session.type}
+Username: ${username}
+สถานะ: ⚠️ เกิดข้อผิดพลาดระหว่างดึงข้อมูล
+รายละเอียด: ${err.message}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
+
         console.error('Database Error:', err);
         res.status(500).json({ message: 'Server Error' });
     }
 });
 
-// Enpoint  สำหรับ User ที่จะดูข้อมูลที่ได้ ลงทะเบียน และถูกยอมรับจาก Admin , SuperAdmin
+// Enpoint  สำหรับ User ที่จะดูข้อมูลที่ได้ ลงทะเบียน(เตียมเข้าชั่ง) และถูกยอมรับจาก Admin , SuperAdmin
 app.post('/user/get-btnViewPendingOrders', async (req, res) => {
     const { sessionKey, username } = req.body;
 
@@ -590,27 +1004,49 @@ app.post('/user/get-btnViewPendingOrders', async (req, res) => {
 
         const id_user = accountRows[0].id;
 
-        // ดึงข้อมูลจาก regiscar_accepted ของ user นี้
-        // const [regiscarRows] = await pool.query(
-        //     'SELECT * FROM regiscar_accepted WHERE id_user = ?',
-        //     [id_user]
-        // );
+        // ดึงข้อมูลจาก ทั้งหมด 
         const [regiscarRows] = await pool.query(
-    'SELECT * FROM regiscar_accepted WHERE id_user = ? AND Status != "Success"',
-    [id_user]
-);
+            'SELECT * FROM regiscar_accepted WHERE id_user = ?',
+            [id_user]
+        );
 
+        // ดึงข้อมูลแค่ Status Success
+    //     const [regiscarRows] = await pool.query(
+    // 'SELECT * FROM regiscar_accepted WHERE id_user = ? AND Status != "Success"',
+    // [id_user]
+//);
 
         res.json({
             success: true,
             data: regiscarRows
         });
 
+        // Log SELECT สำเร็จ
+        writeLog(`====================================== Get BtnViewPendingOrders Success  สำหรับ User ที่จะดูข้อมูลที่ได้ ลงทะเบียน(เตียมเข้าชั่ง) และถูกยอมรับจาก Admin , SuperAdmin =================================
+ผู้เรียกใช้งาน: sessionKey = ${sessionKey}, type = ${session.type}
+Username: ${username}
+จำนวนรายการที่ดึงได้: ${regiscarRows.length || 0}
+สถานะ: ✅ ดึงข้อมูลสำเร็จ
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
+
     } catch (err) {
+         // Log กรณีเกิด Error
+        writeLog(`====================================== Get BtnViewPendingOrders Error  สำหรับ User ที่จะดูข้อมูลที่ได้ ลงทะเบียน(เตียมเข้าชั่ง) และถูกยอมรับจาก Admin , SuperAdmin =================================
+ผู้เรียกใช้งาน: sessionKey = ${sessionKey}, type = ${session.type}
+Username: ${username}
+สถานะ: ⚠️ เกิดข้อผิดพลาดระหว่างดึงข้อมูล
+รายละเอียด: ${err.message}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
         console.error('Database Error:', err);
         res.status(500).json({ message: 'Server Error' });
     }
 });
+
+
 
 // Enpoint สำหรับ ยอมรับ จาก Admin , SupderAdmin
 app.post('/register-accepted', async (req, res) => {
@@ -668,6 +1104,14 @@ app.post('/register-accepted', async (req, res) => {
             //  ต้อง ลบ ใน regis ใ้หได้
 
             await conn.commit();
+ // Log INSERT สำเร็จ
+            writeLog(`====================================== Register Accepted Success Enpoint สำหรับ ยอมรับ จาก Admin , SupderAdmin =================================
+ผู้เรียกใช้งาน: sessionKey = ${sessionKey}, type = ${session.type}
+จำนวนรายการที่ INSERT: ${dataList.length}
+สถานะ: ✅ INSERT สำเร็จ
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);            
             res.status(200).json({
                 message: 'Data inserted successfully',
                 insertedCount: dataList.length
@@ -675,6 +1119,15 @@ app.post('/register-accepted', async (req, res) => {
 
         } catch (err) {
             await conn.rollback();
+             // Log Error ระหว่าง Transaction
+            writeLog(`====================================== Register Accepted Error =================================
+ผู้เรียกใช้งาน: sessionKey = ${sessionKey}, type = ${session.type}
+สถานะ: ⚠️ Transaction error
+รายละเอียด: ${err.message}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
+
             console.error('Database transaction error:', err);
             res.status(500).json({ message: 'Database error', error: err.message });
         } finally {
@@ -682,6 +1135,16 @@ app.post('/register-accepted', async (req, res) => {
         }
 
     } catch (err) {
+
+          // Log Error Server
+        writeLog(`====================================== Register Accepted Error =================================
+ผู้เรียกใช้งาน: sessionKey = ${sessionKey}, type = ${session?.type || 'Unknown'}
+สถานะ: ⚠️ Server error
+รายละเอียด: ${err.message}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
+
         console.error('Server error:', err);
         res.status(500).json({ message: 'Server error', error: err.message });
     }
@@ -701,7 +1164,26 @@ app.post('/register-rejected', async (req, res) => {
     try {
         await pool.query('DELETE FROM regiscar WHERE id = ?', [id]);
         res.status(200).json({ message: 'Data deleted successfully', id: id });
+
+         // Log DELETE สำเร็จ
+        writeLog(`====================================== Delete Rejected Success =================================
+ผู้เรียกใช้งาน: sessionKey = ${sessionKey}, type = ${session.type}
+ID ที่ลบ: ${id}
+สถานะ: ✅ DELETE สำเร็จ
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
+
     } catch (err) {
+
+         // Log Error ระหว่าง DELETE
+        writeLog(`====================================== Delete Rejected Error =================================
+ผู้เรียกใช้งาน: sessionKey = ${sessionKey}, type = ${session?.type || 'Unknown'}
+สถานะ: ⚠️ Database delete error
+รายละเอียด: ${err.message}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
         console.error('Database delete error:', err);
         res.status(500).json({ message: 'Database error', error: err.message });
     }
@@ -765,6 +1247,15 @@ app.post('/addDataMySQL', async (req, res) => {
             }
             
             await conn.commit();
+
+             // Log INSERT สำเร็จ
+            writeLog(`====================================== Insert regiscar Success =================================
+ผู้ใช้งาน: ${username} (sessionKey: ${sessionKey}, type: ${session.type})
+จำนวนรายการที่เพิ่ม: ${dataList.length}
+สถานะ: ✅ INSERT สำเร็จ
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
             res.status(200).json({ 
                 message: 'Data inserted successfully',
                 insertedCount: dataList.length 
@@ -772,6 +1263,16 @@ app.post('/addDataMySQL', async (req, res) => {
             
         } catch (err) {
             await conn.rollback();
+
+             // Log Error ระหว่าง INSERT
+            writeLog(`====================================== Insert regiscar Error =================================
+ผู้ใช้งาน: ${username} (sessionKey: ${sessionKey}, type: ${session?.type || 'Unknown'})
+สถานะ: ⚠️ Database transaction error
+รายละเอียด: ${err.message}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
+
             console.error('Database transaction error:', err);
             res.status(500).json({ message: 'Database error', error: err.message });
         } finally {
@@ -779,6 +1280,15 @@ app.post('/addDataMySQL', async (req, res) => {
         }
         
     } catch (err) {
+
+          // Log Error Server
+        writeLog(`====================================== Insert regiscar Server Error =================================
+ผู้ใช้งาน: ${username} (sessionKey: ${sessionKey}, type: ${session?.type || 'Unknown'})
+สถานะ: ⚠️ Server error
+รายละเอียด: ${err.message}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
         console.error('Server error:', err);
         res.status(500).json({ message: 'Server error', error: err.message });
     }
@@ -879,9 +1389,26 @@ app.post('/login' ,loginLimiterTokenTruck , async (req, res) => { // สำห�
       process.env.JWT_SECRET,
       { expiresIn: '15m' }   // Token อายุ 15 นาที
     );
-
     res.json({ token });
+
+     // Log login สำเร็จ
+        writeLog(`====================================== Login Truck Success =================================
+ผู้ใช้งาน: ${user}
+สถานะ: ✅ Login สำเร็จ, Token ถูกสร้าง
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+==============================================================================================
+`);
+
   } catch (err) {
+
+     // Log Error Server
+        writeLog(`====================================== Login Truck Server Error =================================
+ผู้ใช้งาน: ${user || 'Unknown'}
+สถานะ: ⚠️ Server error
+รายละเอียด: ${err.message}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+==============================================================================================
+`);
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
@@ -893,8 +1420,25 @@ app.get('/users', authenticateToken, loginLimiterTokenTruck , async (req, res) =
     // ดึงข้อมูลทั้งหมดจาก table regiscar
     const [rows] = await pool.query('SELECT * FROM regiscar_accepted')
 
+     // Log SELECT สำเร็จ
+        writeLog(`====================================== SELECT regiscar_accepted Success =================================
+ผู้ใช้งาน: ${req.user.user}  // req.user มาจาก authenticateToken
+สถานะ: ✅ SELECT สำเร็จ, ดึงข้อมูลทั้งหมด
+จำนวนแถว: ${rows.length}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+==============================================================================================
+`);
     res.json(rows);
+
   } catch (err) {
+     // Log Error
+        writeLog(`====================================== SELECT regiscar_accepted Error =================================
+ผู้ใช้งาน: ${req.user ? req.user.user : 'Unknown'}
+สถานะ: ⚠️ Database error
+รายละเอียด: ${err.message}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+==============================================================================================
+`);
     console.error("Database error:", err);
     res.status(500).json({ message: 'Server error' });
   }
@@ -948,8 +1492,25 @@ app.post('/users/update-status', async (req, res) => {
       return res.status(404).json({ message: 'ไม่พบข้อมูลตาม id ที่ระบุ' });
     }
 
+      // Log UPDATE สำเร็จ
+    writeLog(`====================================== UPDATE regiscar_accepted Success =================================
+สถานะ: ✅ UPDATE สำเร็จ
+id: ${Id}
+ค่า Status ใหม่: ${Status}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+==============================================================================================
+`);
+
     res.json({ message: 'อัปเดตสถานะสำเร็จ', Id, newStatus: Status });
+
   } catch (err) {
+    // Log Error Database
+    writeLog(`====================================== UPDATE regiscar_accepted Error =================================
+สถานะ: ⚠️ Database error
+รายละเอียด: ${err.message}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+==============================================================================================
+`);
     console.error('❌ Database error:', err);
     res.status(500).json({ message: 'Server error' });
   }
@@ -1030,6 +1591,16 @@ app.post('/querygetdatacar', async (req, res) => {
     const [rows] = await pool.query(query, params);
 
     if (rows.length === 0) {
+
+          // Log SELECT สำเร็จ แต่ไม่มีข้อมูล
+      writeLog(`====================================== QUERY regiscar_accepted =================================
+สถานะ: ⚠️ ไม่มีข้อมูล
+FrontPlateShort: ${FrontPlateShort || "-"}
+Status: ${Status || "-"}
+วันที่: ${currentDate}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+==============================================================================================
+`);
       return res.status(202).json({ message: `ไม่มีข้อมูลของวันที่ ${currentDate} ในฐานข้อมูล` });
     }
 
@@ -1039,16 +1610,32 @@ app.post('/querygetdatacar', async (req, res) => {
     //   message: rows
     // });
 
+     // Log SELECT สำเร็จ
+    writeLog(`====================================== QUERY regiscar_accepted =================================
+สถานะ: ✅ SELECT สำเร็จ
+FrontPlateShort: ${FrontPlateShort || "-"}
+Status: ${Status || "-"}
+วันที่: ${currentDate}
+จำนวนผลลัพธ์: ${rows.length}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+==============================================================================================
+`);
+
     res.status(200).json({const:rows.length,message : rows});
 
   } catch (err) {
+
+    // Log Database Error
+    writeLog(`====================================== QUERY regiscar_accepted Error =================================
+สถานะ: ⚠️ Database error
+รายละเอียด: ${err.message}
+เวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+==============================================================================================
+`);
     console.error("Database error:", err);
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
-
-
-
 
 
 app.get('/getdataCar', async (req, res)=>{
