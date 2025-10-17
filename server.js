@@ -961,9 +961,13 @@ app.delete('/super/delete-user', async (req, res) => {
         }
 
         // ลบข้อมูล
-        const [result] = await pool.query(
-            'DELETE FROM accounts WHERE id = ? AND type = ?',
-            [id, 'admin']
+        // const [result] = await pool.query(
+        //     'DELETE FROM accounts WHERE id = ? AND type = ?',
+        //     [id, 'admin']
+        // );
+         const [result] = await pool.query(
+            'DELETE FROM accounts WHERE id = ? ',
+            [id]
         );
 
         if (result.affectedRows === 0) {
