@@ -224,7 +224,7 @@ const loginLimiter = rateLimit({
 
 
 //const activeSessions = new Map();
-const sessions = {};
+/*const sessions = {};
 const activeUsers = new Map(); // เก็บ username ที่กำลัง login อยู่
 
 // Login route
@@ -357,7 +357,8 @@ app.post('/loginAdminandUser', loginLimiter, async (req, res) => {
     }
 });
 
-
+*/
+/*
 // 🔹 API สำหรับ Logout (ต้องเพิ่มเพื่อลบ session)
 app.post('/logout-adminanduser', async (req, res) => {
     const { sessionKey } = req.body;
@@ -404,6 +405,179 @@ setInterval(() => {
         }
     }
 }, 5 * 60 * 1000); // เช็คทุก 5 นาที
+*/
+
+const sessions = {};
+const activeUsers = new Map();
+
+// Login route (ไม่เปลี่ยนแปลง - ถูกต้องแล้ว)
+app.post('/loginAdminandUser', loginLimiter, async (req, res) => {
+    const { username, password } = req.body;
+    
+    if (!username || !password) {
+        return res.status(400).json({ message: 'กรุณาใส่กรอกข้อมูล user และ password' });
+    }
+
+    try {
+        const conn = await pool.getConnection();
+        const [result] = await conn.query(
+            'SELECT * FROM accounts WHERE username = ? AND password_hash = ?',
+            [username, password]
+        );
+        conn.release();
+
+        if (result.length === 0) {
+            return res.status(401).json({ message: 'User หรือ Password ไม่ถูกต้อง' });
+        }
+
+        const user = result[0];
+
+        // เช็คว่ามี User นี้ login อยู่แล้วหรือไม่
+        if (activeUsers.has(username)) {
+            const existingSession = activeUsers.get(username);
+            
+            if (existingSession.expireTime > Date.now()) {
+                return res.status(409).json({ 
+                    message: 'มีผู้ใช้งาน login อยู่แล้ว ไม่สามารถ login ซ้ำได้',
+                    alreadyLoggedIn: true
+                });
+            } else {
+                delete sessions[existingSession.sessionKey];
+                activeUsers.delete(username);
+            }
+        }
+
+        let departmentData = user.department;
+
+        const sessionKey = crypto.randomBytes(16).toString('hex');
+        const expireTime = Date.now() + 24 * 60 * 60 * 1000;
+
+        // 🔹 เพิ่ม lastActivity ตอน login
+        sessions[sessionKey] = {
+            username: user.username,
+            type: user.type,
+            supplier: user.supplier,
+            expireTime,
+            lastActivity: Date.now() // เพิ่มบรรทัดนี้
+        };
+
+        activeUsers.set(username, {
+            sessionKey: sessionKey,
+            expireTime: expireTime,
+            type: user.type
+        });
+
+        res.json({
+            message: 'Login สำเร็จ',
+            data: {
+                username: user.username,
+                type: user.type,
+                supplier: user.supplier,
+                loginTime: Date.now(),
+                sessionKey,
+                expireTime,
+                departmentData
+            }
+        });
+
+    } catch (err) {
+        console.error('Server Error:', err);
+        res.status(500).json({ message: 'Server Error' });
+    }
+});
+
+app.post('/logout-adminanduser', async (req, res) => {
+    const { sessionKey } = req.body;
+
+    if (!sessionKey || !sessions[sessionKey]) {
+        return res.status(401).json({ message: 'Session not found' });
+    }
+
+    const session = sessions[sessionKey];
+    const username = session.username;
+
+    delete sessions[sessionKey];
+    activeUsers.delete(username);
+
+    res.json({
+        success: true,
+        message: 'Logout สำเร็จ'
+    });
+});
+
+// Heartbeat API
+app.post('/heartbeat', (req, res) => {
+    const { sessionKey } = req.body;
+
+    if (!sessionKey || !sessions[sessionKey]) {
+        return res.status(401).json({ 
+            success: false,
+            message: 'Session not found' 
+        });
+    }
+
+    const session = sessions[sessionKey];
+    
+    // เช็คว่า session หมดอายุหรือยัง
+    if (Date.now() > session.expireTime) {
+        const username = session.username;
+        delete sessions[sessionKey];
+        activeUsers.delete(username);
+        
+        return res.status(401).json({ 
+            success: false,
+            message: 'Session expired' 
+        });
+    }
+    
+    // อัพเดทเวลาล่าสุดที่ active
+    session.lastActivity = Date.now();
+
+    res.json({ success: true });
+});
+
+// 🔹 ทำความสะอาด session ที่ไม่มี heartbeat หรือหมดอายุ
+setInterval(() => {
+    const now = Date.now();
+    const inactiveTimeout = 2 * 60 * 1000; // 2 นาที
+    
+    for (const [sessionKey, session] of Object.entries(sessions)) {
+        let shouldDelete = false;
+        let reason = '';
+
+        // เช็ค 1: session หมดอายุ (24 ชั่วโมง)
+        if (session.expireTime < now) {
+            shouldDelete = true;
+            reason = 'Session หมดอายุ';
+        }
+        // เช็ค 2: ไม่มี heartbeat เกิน 2 นาที
+        else if (session.lastActivity && (now - session.lastActivity) > inactiveTimeout) {
+            shouldDelete = true;
+            reason = 'ไม่มี activity เกิน 2 นาที';
+        }
+
+        if (shouldDelete) {
+            const username = session.username;
+            delete sessions[sessionKey];
+            activeUsers.delete(username);
+            
+            console.log(`Session cleaned: ${username} - ${reason}`);
+            // writeLog ถ้าต้องการ
+        }
+    }
+}, 60 * 1000); // เช็คทุก 1 นาที
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
