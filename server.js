@@ -225,6 +225,7 @@ const loginLimiter = rateLimit({
 
 //const activeSessions = new Map();
 const sessions = {};
+const activeUsers = new Map(); // เก็บ username ที่กำลัง login อยู่
 
 // Login route
 app.post('/loginAdminandUser', loginLimiter, async (req, res) => {
@@ -257,6 +258,31 @@ writeLog(`====================================== Login Failed (ผู้เข�
 
         const user = result[0];
 
+                // 🔹 เช็คว่ามี User นี้ login อยู่แล้วหรือไม่
+        if (activeUsers.has(username)) {
+            const existingSession = activeUsers.get(username);
+            
+            // เช็คว่า session เดิมยังไม่หมดอายุ
+            if (existingSession.expireTime > Date.now()) {
+                writeLog(`====================================== Login Rejected (มีผู้ใช้งานอยู่แล้ว) 🚫 =================================
+ชื่อผู้ใช้ (Username): ${username}
+ประเภทผู้ใช้ (User Type): ${user.type}
+สถานะ: 🚫 มีผู้ใช้งาน login อยู่แล้ว
+เวลาที่พยายาม login: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+====================================================================================================
+`);
+                return res.status(409).json({ 
+                    message: 'มีผู้ใช้งาน login อยู่แล้ว ไม่สามารถ login ซ้ำได้',
+                    alreadyLoggedIn: true
+                });
+            } else {
+                // ถ้า session เดิมหมดอายุแล้ว ให้ลบออก
+                delete sessions[existingSession.sessionKey];
+                activeUsers.delete(username);
+            }
+        }
+
+
       let departmentData = null;
  // เก็บเฉพาะค่า department
     if (user.type === 'user') {
@@ -283,6 +309,12 @@ writeLog(`====================================== Login Failed (ผู้เข�
             expireTime
         };
 
+         // 🔹 เก็บข้อมูล user ที่กำลัง login อยู่
+        activeUsers.set(username, {
+            sessionKey: sessionKey,
+            expireTime: expireTime,
+            type: user.type
+        });
 
        // เขียน log
 writeLog(`====================================== Login Success (ผู้เข้าใช้งานระบบสำเสร็จ) ✅ =================================
@@ -325,6 +357,53 @@ writeLog(`====================================== Login Error (ผู้เข้
     }
 });
 
+
+// 🔹 API สำหรับ Logout (ต้องเพิ่มเพื่อลบ session)
+app.post('/logout-adminanduser', async (req, res) => {
+    const { sessionKey } = req.body;
+
+    if (!sessionKey || !sessions[sessionKey]) {
+        return res.status(401).json({ message: 'Session not found' });
+    }
+
+    const session = sessions[sessionKey];
+    const username = session.username;
+
+    // ลบ session และ active user
+    delete sessions[sessionKey];
+    activeUsers.delete(username);
+
+    writeLog(`====================================== Logout Success ✅ =================================
+ชื่อผู้ใช้ (Username): ${username}
+เวลา Logout: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+===============================================================================================
+`);
+
+    res.json({
+        success: true,
+        message: 'Logout สำเร็จ'
+    });
+});
+
+// 🔹 ทำความสะอาด session ที่หมดอายุ (ควรรันเป็นระยะ)
+setInterval(() => {
+    const now = Date.now();
+    
+    // ลบ sessions ที่หมดอายุ
+    for (const [sessionKey, session] of Object.entries(sessions)) {
+        if (session.expireTime < now) {
+            const username = session.username;
+            delete sessions[sessionKey];
+            activeUsers.delete(username);
+            
+            writeLog(`====================================== Session Expired 🕐 =================================
+ชื่อผู้ใช้ (Username): ${username}
+เวลาที่ Session หมดอายุ: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+===============================================================================================
+`);
+        }
+    }
+}, 5 * 60 * 1000); // เช็คทุก 5 นาที
 
 
 
